@@ -65,16 +65,17 @@ def test_df_mean():
 
 def create_test_ratings():
     import random
-    USERS = 50
-    MOVIES = 10
-    RATING = 5
+    USERS = 200
+    MOVIES = 40
+    MAX_RATING = 5
+    NUM_RATINGS = 1600
     TS = 878543075
     rating_set = set()
 
-    while len(rating_set) < 100:
+    while len(rating_set) < NUM_RATINGS:
         user_id = random.randint(1, USERS)
         movie_id = random.randint(1, MOVIES)
-        rating = random.randint(1, RATING)
+        rating = random.randint(1, MAX_RATING)
         rating_set.add((user_id, movie_id, rating, TS))
 
     rating_list = list()
@@ -189,7 +190,7 @@ def test_arg_parse():
 
 def main():
     print 'Hello'
-    test_arg_parse()
+    create_test_ratings()
 
 
 if __name__ == '__main__':
