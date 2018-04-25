@@ -9,7 +9,7 @@ np.set_printoptions(precision=3)
 def read_ratings_from_file(file_path, separator, line_terminator, columns):
     """Reads the ratings data from the file residing at file_path, and returns the in-memory pandas dataframe
     :param file_path: String file path
-    :param separator: , for CSV file and \t for a TSV file
+    :param separator: [,] for CSV file and [\t] for a TSV file
     :param line_terminator: Character used to terminate a line in the file
     :param columns: List of column strings
     :return: Pivot table (dataframe) with user-id as rows and movie-id as columns
