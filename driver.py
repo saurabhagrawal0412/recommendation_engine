@@ -4,23 +4,26 @@
 #   python driver.py [file path of the config file]
 #
 
+import argparse
 from configparser import ConfigParser
-from data_reader import get_ratings_df
-from rating_normalization import perform_normalization
-from similarity_computation import compute_similarity
-from neighbor_selection import select_neighbors
-import dimensionality_reduction
-from validation import compute_validation_error
-import prediction
 import sys
+
+from data_reader import get_ratings_df
+import dimensionality_reduction
+from neighbor_selection import select_neighbors
+from rating_normalization import perform_normalization
+import prediction
+from similarity_computation import compute_similarity
+from validation import compute_validation_error
 
 
 def main():
     """The main method of the recommendation engine
     """
+    parser = argparse.ArgumentParser()
+    parser.add_argument('config_file', help='Location of the config file')
     config = ConfigParser()
-    config_file = sys.argv[1]
-    config.read(config_file)
+    config.read(parser.parse_args().config_file)
     train_ratings_df, test_ratings_df = get_ratings_df(config)
     train_ratings_df = perform_normalization(config, train_ratings_df)
     similarity_df = compute_similarity(config, train_ratings_df)
