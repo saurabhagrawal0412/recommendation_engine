@@ -179,9 +179,17 @@ def svd_test():
     U, sigma, Vt = svds(a, k=2)
 
 
+def test_arg_parse():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('echo', help='echo the string you use here')
+    args = parser.parse_args()
+    print args.echo
+
+
 def main():
     print 'Hello'
-    sort_by_index_test()
+    test_arg_parse()
 
 
 if __name__ == '__main__':
