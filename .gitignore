@@ -1,6 +1,5 @@
-# Ignoring pyc and html files
+# Ignoring pyc files
 *.pyc
-*.html
 
 # Ignoring all the data files
 data/*
