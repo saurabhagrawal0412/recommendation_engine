@@ -33,7 +33,6 @@ def main():
     # prediction_df = prediction.get_avg_rating_recc(train_ratings_df, nearest_dict)
 
     prediction_df = predict(config, train_ratings_df, similarity_df, nearest_dict)
-    print type(prediction_df)
     from data_reader import display_dataframe
     display_dataframe(train_ratings_df, 'training.html')
     display_dataframe(prediction_df, 'svd_pred.html')

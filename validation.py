@@ -17,7 +17,7 @@ def compute_mean_absolute_error(ratings_df, predicted_df):
             if not (math.isnan(rat_cell) or math.isnan(pred_cell)):
                 total_error += abs(pred_cell - rat_cell)
                 point_count += 1
-    print 'Total error ->', total_error, 'Point count ->', point_count
+    # print 'Total error ->', total_error, 'Point count ->', point_count
     return total_error/point_count if point_count != 0 else 0
 
 
@@ -34,7 +34,7 @@ def compute_root_mean_squared_error(ratings_df, predicted_df):
             if not (math.isnan(rat_cell) or math.isnan(pred_cell)):
                 total_sq_error += (pred_cell - rat_cell) ** 2
                 point_count += 1
-    print 'Total squared error ->', total_sq_error, 'Point count ->', point_count
+    # print 'Total squared error ->', total_sq_error, 'Point count ->', point_count
     return math.sqrt(total_sq_error/point_count) if point_count != 0 else 0
 
 
