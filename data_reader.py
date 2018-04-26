@@ -47,6 +47,7 @@ def display_dataframe(df, file_name):
     import os
     import webbrowser
     html = df.to_html(na_rep="")
+    file_name = 'data/' + file_name
     with open(file_name, "w") as f:
         f.write(html)
     full_filename = os.path.abspath(file_name)
