@@ -1,27 +1,24 @@
+# Utility script tp compute
+
+from matrix_factorization import perform_matrix_factorization
 import numpy as np
+import pandas as pd
 
 
 def perform_svd(ratings_df, k):
     """Performs Single Value Decomposition on the given ratings dataframe,
     and returns the predicted values by multiplying the user and item matrices
     :param ratings_df: Dataframe with user-id as rows and movie-id as columns
-    :return: The prediction matrix
+    :param k: The number of parameters
+    :return: The pivot table (DataFrame) storing the predicted ratings
     """
-    from scipy.sparse.linalg import svds
-    u, sigma, vt = svds(ratings_df, k=k)
-    sigma = np.diag(sigma)
+    # from scipy.sparse.linalg import svds
+    # u, sigma, vt = svds(ratings_df, k=k)
+    # sigma = np.diag(sigma)
+    u, vt = perform_matrix_factorization(ratings_df.values)
     predicted_ratings = np.dot(u, vt)
-    # predicted_ratings = np.dot(np.dot(U, sigma), Vt)
-    return predicted_ratings
+    row_index = list(ratings_df.index.values)
+    col_index = list(ratings_df.columns)
+    prediction_df = pd.DataFrame(predicted_ratings, index=row_index, columns=col_index)
+    return prediction_df
 
-
-def predict(config, ratings_df):
-    """Performs prediction according to the configuration, and returns the prediction matrix
-    :param config: The ConfigParser object
-    :param ratings_df: Dataframe with user-id as rows and movie-id as columns
-    :return: The prediction matrix
-    """
-    method = config.get('DIMENSIONALITY_REDUCTION', 'Method')
-    if method == 'SVD':
-        k = int(config.get('DIMENSIONALITY_REDUCTION', 'k'))
-        return perform_svd(ratings_df, k)
