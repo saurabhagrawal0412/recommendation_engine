@@ -3,3 +3,5 @@
 
 # Ignoring all the data files
 data/*
+credentials.ini
+graph_test2.py
