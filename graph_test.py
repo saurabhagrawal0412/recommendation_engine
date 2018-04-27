@@ -14,6 +14,7 @@ import sys
 
 
 RATINGS_FILE = 'data/ml-100k/ua.base'
+IS_GRAPH_CONSTRUCTED = True
 
 
 def get_ratings_df(file_path):
@@ -46,21 +47,43 @@ def create_graph(cred_config, ratings_df):
     database_uri = cred_config.get('NEO4J', 'DatabaseURI')
     graph = Graph(database_uri)
 
+    if not IS_GRAPH_CONSTRUCTED:
+        tx = graph.cypher.begin()
+        statement = ("MERGE (u:User {user_id:{A}}) "
+                     "MERGE (i:Item {item_id:{C}}) "
+                     "MERGE (u)-[r:Rated {rating:{B},timestamp:{D}}]->(i);")
+        for r, row in ratings_df.iterrows():
+            tx.append(statement, {'A': int(row.loc['user_id']), 'B': float(row.loc['rating']),
+                                  'C': int(row.loc['item_id']), 'D': int(row.loc['timestamp'])})
+            if r % 100 == 0:
+                tx.process()
+        tx.commit()
+        graph.cypher.execute('CREATE INDEX ON :User(user_id)')
+        graph.cypher.execute('CREATE INDEX ON :Item(item_id)')
+
+    return graph
+
+
+def find_predictability(graph, user_id1, user_id2):
+    """Determines the predictability between 2 users
+    :param graph: py2neo Graph object
+    :param user_id1: User ID of the first user
+    :param user_id2: User ID of the second user
+    :return: Float predictability between the 2 users
+    """
     tx = graph.cypher.begin()
-    statement = ("MERGE (u:User {user_id:{A}}) "
-                 "MERGE (i:Item {item_id:{C}}) "
-                 "MERGE (u)-[r:Rated {rating:{B},timestamp:{D}}]->(i);")
+    statement = 'MATCH (u1:User {user_id:{user_id1}})-[r1:Rated]->' \
+                '(i:Item)' \
+                '<-[r2:Rated]-(u2:User {user_id:{user_id2}}) ' \
+                'RETURN count(*) AS COUNT, sum(abs(r1.rating - r2.rating)) AS TOTAL;'
+    tx.append(statement, {'user_id1': user_id1, 'user_id2': user_id2})
+    result = tx.commit()
+    count = result[0][0]['COUNT']
+    total = result[0][0]['TOTAL']
+    return count, total
 
-    for r, row in ratings_df.iterrows():
-        tx.append(statement, {'A': int(row.loc['user_id']), 'B': int(row.loc['rating']),
-                              'C': int(row.loc['item_id']), 'D': int(row.loc['timestamp'])})
-        if r % 100 == 0:
-            tx.process()
-    tx.commit()
 
-    graph.cypher.execute('CREATE INDEX ON :User(user_id)')
-    graph.cypher.execute('CREATE INDEX ON :Item(item_id)')
-
+# def find_similar_users(ratings_df, graph):
 
 def main():
     """Main method
@@ -76,5 +99,5 @@ def main():
 
 
 if __name__ == '__main__':
-    sys.stdout = open('data/graph_log.txt', 'w')
+    # sys.stdout = open('data/graph_log.txt', 'w')
     main()
