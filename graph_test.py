@@ -6,12 +6,16 @@
 
 import argparse
 from configparser import ConfigParser
+import math
+import numpy as np
 import pandas as pd
+import pickle
 from py2neo import authenticate, Graph
 import sys
 
 
-RATINGS_FILE = 'data/ml-100k/ua.base'
+TRAIN_FILE = 'data/ml-100k/ua.base'
+TEST_FILE = 'data/ml-100k/ua.test'
 IS_GRAPH_CONSTRUCTED = True
 
 
@@ -39,14 +43,58 @@ class Path:
         """Constructor for Path
         :param record: py2neo.cypher.core.Record object that holds information about all the edges
         """
+        self.total_dist = 0.0
         self.edge_list = list()
         for relationship in record[0]:
-            self.edge_list.append(Edge(relationship.properties))
+            curr_edge = Edge(relationship.properties)
+            self.edge_list.append(curr_edge)
+            self.total_dist += curr_edge.pred_val
 
     def __str__(self):
         """Returns the string representation of the Path object
         """
         return '\n'.join(map(str, self.edge_list))
+
+    def __cmp__(self, other):
+        """Method to compare the current and the other object
+        :param other: The other Path object
+        :return: The smaller object
+        """
+        return cmp(self.total_dist, other.total_dist)
+
+
+def compute_mean_absolute_error(ratings_df, predicted_df):
+    """Compares the actual and the predicted ratings and computes the mean absolute error
+    :param ratings_df: The pivot table dataframe that stores the ratings given by users to the items
+    :param predicted_df: The pivot table dataframe that stores the predicted ratings
+    :return: The float mean absolute error
+    """
+    total_error = 0.0
+    point_count = 0
+    for (rat_row_idx, rat_row), (pred_row_idx, pred_row) in zip(ratings_df.iterrows(), predicted_df.iterrows()):
+        for (rat_col_idx, rat_cell), (pred_col_idx, pred_cell) in zip(rat_row.iteritems(), pred_row.iteritems()):
+            if not (math.isnan(rat_cell) or math.isnan(pred_cell)):
+                total_error += abs(pred_cell - rat_cell)
+                point_count += 1
+    # print 'Total error ->', total_error, 'Point count ->', point_count
+    return total_error/point_count if point_count != 0 else 0
+
+
+def compute_root_mean_squared_error(ratings_df, predicted_df):
+    """Compares the actual and the predicted ratings and computes the root mean squared error
+    :param ratings_df: The pivot table dataframe that stores the ratings given by users to the items
+    :param predicted_df: The pivot table dataframe that stores the predicted ratings
+    :return: The float root mean squared error
+    """
+    total_sq_error = 0.0
+    point_count = 0
+    for (rat_row_idx, rat_row), (pred_row_idx, pred_row) in zip(ratings_df.iterrows(), predicted_df.iterrows()):
+        for (rat_col_idx, rat_cell), (pred_col_idx, pred_cell) in zip(rat_row.iteritems(), pred_row.iteritems()):
+            if not (math.isnan(rat_cell) or math.isnan(pred_cell)):
+                total_sq_error += (pred_cell - rat_cell) ** 2
+                point_count += 1
+    # print 'Total squared error ->', total_sq_error, 'Point count ->', point_count
+    return math.sqrt(total_sq_error/point_count) if point_count != 0 else 0
 
 
 def get_ratings_df(file_path):
@@ -70,10 +118,10 @@ def perform_authentication(cred_config):
     authenticate(host_port, user_name, password)
 
 
-def create_graph(cred_config, ratings_df):
+def create_graph(cred_config, train_df):
     """Creates the neo4j graph by inserting all the ratings as edges
     :param cred_config: ConfigParser object for credentials config file
-    :param ratings_df: Pandas dataframe with rows as different ratings
+    :param train_df: Pandas dataframe with rows as different ratings
     :return: py2neo Graph object
     """
     database_uri = cred_config.get('NEO4J', 'DatabaseURI')
@@ -84,7 +132,7 @@ def create_graph(cred_config, ratings_df):
         statement = ("MERGE (u:User {user_id:{A}}) "
                      "MERGE (i:Item {item_id:{C}}) "
                      "MERGE (u)-[r:Rated {rating:{B},timestamp:{D}}]->(i);")
-        for r, row in ratings_df.iterrows():
+        for r, row in train_df.iterrows():
             tx.append(statement, {'A': int(row.loc['user_id']), 'B': float(row.loc['rating']),
                                   'C': int(row.loc['item_id']), 'D': int(row.loc['timestamp'])})
             if r % 100 == 0:
@@ -94,7 +142,7 @@ def create_graph(cred_config, ratings_df):
         graph.cypher.execute('CREATE INDEX ON :User(user_id)')
         graph.cypher.execute('CREATE INDEX ON :Item(item_id)')
 
-        unique_users = ratings_df['user_id'].unique()
+        unique_users = train_df['user_id'].unique()
         create_pred_edges(cred_config, unique_users, graph)
 
     return graph
@@ -223,8 +271,8 @@ def create_pred_edges(cred_config, unique_users, graph):
                                        max_rating, min_horting, max_predictability)
 
 
-def find_path_between(graph, user_id1, user_id2, max_path_len):
-    """Finds and prints the predictability path between 2 users
+def find_shortest_path(graph, user_id1, user_id2, max_path_len):
+    """Finds the shortest predictability path between 2 users
     :param graph: py2neo Graph object
     :param user_id1: User ID of the first user
     :param user_id2: User ID of the second user
@@ -238,21 +286,76 @@ def find_path_between(graph, user_id1, user_id2, max_path_len):
     tx.append(statement, {'user_id1': int(user_id1), 'user_id2': int(user_id2), 'max_path_len': int(max_path_len)})
     result = tx.commit()
     path_list = [Path(record) for record in result[0]]
-    return path_list
+    return min(path_list) if len(path_list) > 0 else None
 
 
 def get_users_from_item(graph, item_id):
-    """Finds and returns the list of all the users who rated the item with the given item_id
+    """Finds all the users who rated the item and returns a dict that maps from their user_id to rating
     :param graph: py2neo Graph object
     :param item_id: ID of the item for which we need to determine the users
-    :return: List of integer user ids
+    :return: Dict that maps user_id to their rating
     """
-    statement = 'MATCH (u:User)-[r:Rated]->(i:Item {item_id:{item_id}}) RETURN u.user_id AS USER_ID;'
+    statement = 'MATCH (u:User)-[r:Rated]->(i:Item {item_id:{item_id}}) ' \
+                'RETURN u.user_id AS USER_ID, r.rating AS RATING;'
     tx = graph.cypher.begin()
     tx.append(statement, {'item_id': int(item_id)})
     result = tx.commit()
-    user_list = [row['USER_ID'] for row in result[0]]
-    return user_list
+    user_dict = {row['USER_ID']: row['RATING'] for row in result[0]}
+    return user_dict
+
+
+def predict_first_rating(end_rating, shortest_path):
+    """Predicts the rating given by the first user in the shortest path
+    :param end_rating: The rating given to the item by the last user
+    :param shortest_path: Path shortest path
+    :return: Float first rating
+    """
+    curr_rating = end_rating
+    rev_edges = list(reversed(shortest_path.edge_list))
+    for edge in rev_edges:
+        curr_rating = curr_rating * edge.s_val + edge.t_val
+    return curr_rating
+
+
+def predict_rating(graph, user_id, item_id, path_length):
+    """Determines predicted rating for a user for a particular item
+    :param graph: py2neo Graph object
+    :param user_id: User ID of the user
+    :param item_id: Item ID of the item
+    :param path_length: Maximum path length of the path
+    :return: Float predicted rating
+    """
+    user_dict = get_users_from_item(graph, item_id)
+    total_rating, divisor = 0.0, 0.0
+    for other_user, other_rating in user_dict.iteritems():
+        shortest_path = find_shortest_path(graph, user_id, other_user, path_length)
+        if shortest_path is not None:
+            total_rating += predict_first_rating(other_rating, shortest_path)
+            divisor += 1.0
+    return (total_rating + 0.0) / divisor if divisor > 0 else None
+
+
+def predict_test_ratings(cred_config, graph, test_df):
+    """Predicts the ratings for the test datapoints
+    :param cred_config: ConfigParser object for the credentials config file
+    :param graph: py2neo Graph object
+    :param test_df: Dataframe that contains test ratings in a matrix with rows as users and columns as items
+    :return: Dataframe that stores the predicted ratings
+    """
+    path_length = int(cred_config.get('GRAPH', 'MaxPathLength'))
+    prediction_df = test_df.copy(deep=True)
+    counter = 0
+    for row_idx, row in prediction_df.iterrows():
+        user_id, item_id, actual_rating = int(row['user_id']), int(row['item_id']), int(row['rating'])
+        predicted_rating = predict_rating(graph, user_id, item_id, path_length)
+        if predicted_rating is not None:
+            print 'ActualRating:', actual_rating, 'PredictedRating:', predicted_rating
+            prediction_df.ix[row_idx]['rating'] = predicted_rating
+        else:
+            prediction_df.ix[row_idx]['rating'] = np.nan
+        counter += 1
+        print 'Counter:', counter
+    return prediction_df
 
 
 def main():
@@ -263,12 +366,20 @@ def main():
     parser.add_argument('cred_config_file', help='Location of the credentials file')
     cred_config = ConfigParser()
     cred_config.read(parser.parse_args().cred_config_file)
-    ratings_df = get_ratings_df(RATINGS_FILE)
+    train_df = get_ratings_df(TRAIN_FILE)
 
     perform_authentication(cred_config)
-    graph = create_graph(cred_config, ratings_df)
-    # find_path_between(graph, 137, 43, 2)
-    get_users_from_item(graph, 43)
+    graph = create_graph(cred_config, train_df)
+    test_df = get_ratings_df(TEST_FILE)
+    pred_df = predict_test_ratings(cred_config, graph, test_df)
+    file_handler = open('pred_df.data', 'w')
+    pickle.dump(pred_df, file_handler)
+    test_pivot = pd.pivot_table(test_df, index='user_id', columns='movie_id', values='rating', aggfunc=np.max)
+    pred_pivot = pd.pivot_table(pred_df, index='user_id', columns='movie_id', values='rating', aggfunc=np.max)
+    mae = compute_mean_absolute_error(test_pivot, pred_pivot)
+    print 'MeanAbsoluteError:', mae
+    rmse = compute_root_mean_squared_error(test_pivot, pred_pivot)
+    print 'RootMeanAbsoluteError', rmse
 
 
 if __name__ == '__main__':
