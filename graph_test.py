@@ -15,6 +15,40 @@ RATINGS_FILE = 'data/ml-100k/ua.base'
 IS_GRAPH_CONSTRUCTED = True
 
 
+class Edge:
+    """Object that stores various attributes of an edge
+    """
+    def __init__(self, properties):
+        """Constructor for Edge
+        :param properties: py2neo.core.PropertySet object that holds information about the edge
+        """
+        self.s_val = properties['s_val']
+        self.t_val = properties['t_val']
+        self.pred_val = properties['pred_val']
+
+    def __str__(self):
+        """Returns the string representation of the Edge object
+        """
+        return 'S:%d  T:%d  PredVal:%.2f' % (self.s_val, self.t_val, self.pred_val)
+
+
+class Path:
+    """Object that stores a path
+    """
+    def __init__(self, record):
+        """Constructor for Path
+        :param record: py2neo.cypher.core.Record object that holds information about all the edges
+        """
+        self.edge_list = list()
+        for relationship in record[0]:
+            self.edge_list.append(Edge(relationship.properties))
+
+    def __str__(self):
+        """Returns the string representation of the Path object
+        """
+        return '\n'.join(map(str, self.edge_list))
+
+
 def get_ratings_df(file_path):
     """Reads the ratings file at the file path and returns the in-memory dataframe
     :param file_path: String file path
@@ -56,8 +90,12 @@ def create_graph(cred_config, ratings_df):
             if r % 100 == 0:
                 tx.process()
         tx.commit()
+
         graph.cypher.execute('CREATE INDEX ON :User(user_id)')
         graph.cypher.execute('CREATE INDEX ON :Item(item_id)')
+
+        unique_users = ratings_df['user_id'].unique()
+        create_pred_edges(cred_config, unique_users, graph)
 
     return graph
 
@@ -185,6 +223,38 @@ def create_pred_edges(cred_config, unique_users, graph):
                                        max_rating, min_horting, max_predictability)
 
 
+def find_path_between(graph, user_id1, user_id2, max_path_len):
+    """Finds and prints the predictability path between 2 users
+    :param graph: py2neo Graph object
+    :param user_id1: User ID of the first user
+    :param user_id2: User ID of the second user
+    :param max_path_len: Max allowed path length between the 2 users
+    :return:
+    """
+    statement = 'MATCH (u1:User {user_id:{user_id1}}) ' \
+                'MATCH (u2:User {user_id:{user_id2}}) ' \
+                'MATCH (u1)-[p:Predictability*..%d]->(u2) RETURN p;' % max_path_len
+    tx = graph.cypher.begin()
+    tx.append(statement, {'user_id1': int(user_id1), 'user_id2': int(user_id2), 'max_path_len': int(max_path_len)})
+    result = tx.commit()
+    path_list = [Path(record) for record in result[0]]
+    return path_list
+
+
+def get_users_from_item(graph, item_id):
+    """Finds and returns the list of all the users who rated the item with the given item_id
+    :param graph: py2neo Graph object
+    :param item_id: ID of the item for which we need to determine the users
+    :return: List of integer user ids
+    """
+    statement = 'MATCH (u:User)-[r:Rated]->(i:Item {item_id:{item_id}}) RETURN u.user_id AS USER_ID;'
+    tx = graph.cypher.begin()
+    tx.append(statement, {'item_id': int(item_id)})
+    result = tx.commit()
+    user_list = [row['USER_ID'] for row in result[0]]
+    return user_list
+
+
 def main():
     """Main method
     :return:
@@ -194,11 +264,11 @@ def main():
     cred_config = ConfigParser()
     cred_config.read(parser.parse_args().cred_config_file)
     ratings_df = get_ratings_df(RATINGS_FILE)
-    unique_users = ratings_df['user_id'].unique()
 
     perform_authentication(cred_config)
     graph = create_graph(cred_config, ratings_df)
-    create_pred_edges(cred_config, unique_users, graph)
+    # find_path_between(graph, 137, 43, 2)
+    get_users_from_item(graph, 43)
 
 
 if __name__ == '__main__':
